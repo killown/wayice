@@ -1,7 +1,6 @@
 # Wayice
 
-A compositor used as a testing ground for new smithay features.
-For a simple example compositor consider reading [smallvil](https://github.com/Smithay/smithay/tree/master/smallvil)
+Wayice is a sleek and efficient Wayland compositor built using Rust and Smithay. It offers a modern, fast, and lightweight window management experience, leveraging the safety and performance benefits of Rust for smooth rendering and enhanced security.
 
 ## Dependencies
 
@@ -41,14 +40,3 @@ The currently available backends are:
   compositor. Note that this requires you to start wayice as root if your system does not have logind
   available.
 
-### Supported Environment Variables
-
-| Variable                      | Example         | Backends  |
-|-------------------------------|-----------------|-----------|
-| ANVIL_DRM_DEVICE              | /dev/dri/card0  | tty-udev  |
-| ANVIL_DISABLE_10BIT           | any             | tty-udev  |
-| ANVIL_DISABLE_DIRECT_SCANOUT  | any             | tty-udev  |
-| ANVIL_DISABLE_DRM_COMPOSITOR  | any             | tty-udev  |
-| ANVIL_NO_VULKAN               | 1,true,yes,y    | x11       |
-| SMITHAY_USE_LEGACY            | 1,true,yes,y    | tty-udev  |
-| SMITHAY_VK_VERSION            | 1.3             |           |
