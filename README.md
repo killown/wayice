@@ -1,5 +1,8 @@
 # Wayice
 
+![nil-79](https://github.com/user-attachments/assets/1461e43b-30d3-4d49-8591-eb5d5456f6b9)
+
+
 Wayice is a sleek and efficient Wayland compositor built using Rust and Smithay. It offers a modern, fast, and lightweight window management experience, leveraging the safety and performance benefits of Rust for smooth rendering and enhanced security.
 
 ## Dependencies
