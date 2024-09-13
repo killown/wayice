@@ -6,19 +6,7 @@
     allow(dead_code, unused_imports)
 )]
 
-#[cfg(any(feature = "udev", feature = "xwayland"))]
-pub mod cursor;
-pub mod drawing;
-pub mod focus;
-pub mod input_handler;
+pub mod core;
 pub mod ipc;
-pub mod render;
+pub mod platform;
 pub mod shell;
-pub mod state;
-#[cfg(feature = "udev")]
-pub mod udev;
-#[cfg(feature = "winit")]
-pub mod winit;
-#[cfg(feature = "x11")]
-pub mod x11;
-pub use state::{ClientState, WayiceState};

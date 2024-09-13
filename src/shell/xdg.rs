@@ -28,9 +28,9 @@ use smithay::{
 use tracing::{trace, warn};
 
 use crate::{
-    focus::KeyboardFocusTarget,
+    core::focus::KeyboardFocusTarget,
+    core::state::{Backend, WayiceState},
     shell::{TouchMoveSurfaceGrab, TouchResizeSurfaceGrab},
-    state::{WayiceState, Backend},
 };
 
 use super::{

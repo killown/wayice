@@ -26,7 +26,7 @@ use smithay::{
 };
 use tracing::{error, trace};
 
-use crate::{focus::KeyboardFocusTarget, state::Backend, WayiceState};
+use crate::{core::focus::KeyboardFocusTarget, core::state::Backend, core::state::WayiceState};
 
 use super::{
     place_new_window, FullscreenSurface, PointerMoveSurfaceGrab, PointerResizeSurfaceGrab, ResizeData,

@@ -20,8 +20,8 @@ use smithay::{utils::Rectangle, xwayland::xwm::ResizeEdge as X11ResizeEdge};
 
 use super::{SurfaceData, WindowElement};
 use crate::{
-    focus::PointerFocusTarget,
-    state::{WayiceState, Backend},
+    core::focus::PointerFocusTarget,
+    core::state::{Backend, WayiceState},
 };
 
 pub struct PointerMoveSurfaceGrab<BackendData: Backend + 'static> {

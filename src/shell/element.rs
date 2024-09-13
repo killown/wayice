@@ -28,7 +28,7 @@ use smithay::{
 };
 
 use super::ssd::HEADER_BAR_HEIGHT;
-use crate::{focus::PointerFocusTarget, state::Backend, WayiceState};
+use crate::{core::focus::PointerFocusTarget, core::state::Backend, core::state::WayiceState};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowElement(pub Window);

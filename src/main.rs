@@ -1,4 +1,6 @@
-use tokio::runtime::Runtime;
+use wayice::platform::udev;
+use wayice::platform::winit;
+use wayice::platform::x11;
 
 static POSSIBLE_BACKENDS: &[&str] = &[
     #[cfg(feature = "winit")]
@@ -39,17 +41,17 @@ fn main() {
         #[cfg(feature = "winit")]
         Some("--winit") => {
             tracing::info!("Starting wayice with winit backend");
-            wayice::winit::run_winit();
+            winit::run_winit();
         }
         #[cfg(feature = "udev")]
         Some("--tty-udev") => {
             tracing::info!("Starting wayice on a tty using udev");
-            wayice::udev::run_udev();
+            udev::run_udev();
         }
         #[cfg(feature = "x11")]
         Some("--x11") => {
             tracing::info!("Starting wayice with x11 backend");
-            wayice::x11::run_x11();
+            x11::run_x11();
         }
         Some(other) => {
             tracing::error!("Unknown backend: {}", other);

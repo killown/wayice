@@ -14,7 +14,7 @@ use smithay::{
 
 use std::cell::{RefCell, RefMut};
 
-use crate::{state::Backend, WayiceState};
+use crate::{core::state::Backend, core::state::WayiceState};
 
 use super::WindowElement;
 

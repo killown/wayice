@@ -38,10 +38,7 @@ use smithay::{
 };
 use tracing::span::Id;
 
-use crate::{
-    state::{Backend, WayiceState},
-    ClientState,
-};
+use crate::core::state::{Backend, ClientState, WayiceState};
 
 mod element;
 mod grabs;
