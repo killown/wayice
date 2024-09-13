@@ -32,11 +32,9 @@ async fn handle_connection(mut conn: Connection) {
                 break;
             }
             Ok(n) => {
-                // Parse the received data
                 let message_str = String::from_utf8_lossy(&buf[..n]);
                 match serde_json::from_str::<Message>(&message_str) {
                     Ok(message) => {
-                        // Process the message
                         process_message(message).await;
 
                         // Optionally: Echo the message back to the client
@@ -57,7 +55,6 @@ async fn handle_connection(mut conn: Connection) {
 }
 
 pub async fn start_ipc_server() -> Result<(), Box<dyn Error>> {
-    // Define the path for the Unix socket
     let socket_path = "/tmp/wayice";
 
     // Create an endpoint for the IPC server
@@ -72,13 +69,11 @@ pub async fn start_ipc_server() -> Result<(), Box<dyn Error>> {
     while let Some(conn) = incoming.next().await {
         match conn {
             Ok(connection) => {
-                // Spawn a task to handle the connection
                 tokio::spawn(handle_connection(connection));
             }
             Err(e) => eprintln!("Error when receiving connection: {:?}", e),
         }
     }
 
-    // Ensure the function returns Ok if it completes successfully
     Ok(())
 }
