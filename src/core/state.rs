@@ -1,9 +1,10 @@
+use home::home_dir;
+use ini::Ini;
 use std::{
     os::unix::io::OwnedFd,
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
-
 use tracing::{info, warn};
 
 use smithay::{
@@ -172,6 +173,7 @@ pub struct WayiceState<BackendData: Backend + 'static> {
     pub renderdoc: Option<renderdoc::RenderDoc<renderdoc::V141>>,
 
     pub show_window_preview: bool,
+    pub focused_surface: Option<wayland_server::protocol::wl_surface::WlSurface>,
 }
 
 delegate_compositor!(@<BackendData: Backend + 'static> WayiceState<BackendData>);
@@ -621,11 +623,44 @@ impl<BackendData: Backend + 'static> WayiceState<BackendData> {
 
         // init input
         let seat_name = backend_data.seat_name();
+
         let mut seat = seat_state.new_wl_seat(&dh, seat_name.clone());
 
         let pointer = seat.add_pointer();
-        seat.add_keyboard(XkbConfig::default(), 200, 25)
-            .expect("Failed to initialize the keyboard");
+
+        // keyboard setup using wayice.ini
+        let home_path = home_dir().expect("Failed to get home directory");
+        let config_path = home_path.join(".config").join("wayice.ini");
+
+        let mut layout = String::from("");
+        let mut variant = String::from("");
+
+        if let Ok(conf) = Ini::load_from_file(config_path) {
+            if let Some(section) = conf.section(Some("keyboard")) {
+                if let Some(l) = section.get("layout") {
+                    layout = l.to_string();
+                }
+                if let Some(v) = section.get("variant") {
+                    variant = v.to_string();
+                }
+            }
+        }
+
+        let keyboard = if layout.is_empty() && variant.is_empty() {
+            seat.add_keyboard(XkbConfig::default(), 200, 25)
+                .expect("Failed to initialize the keyboard")
+        } else {
+            seat.add_keyboard(
+                XkbConfig {
+                    layout: &layout,
+                    variant: &variant,
+                    ..XkbConfig::default()
+                },
+                200, // repeat delay
+                25,  // repeat rate
+            )
+            .expect("Failed to initialize the keyboard")
+        };
 
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(&dh);
 
@@ -677,6 +712,7 @@ impl<BackendData: Backend + 'static> WayiceState<BackendData> {
             #[cfg(feature = "debug")]
             renderdoc: renderdoc::RenderDoc::new().ok(),
             show_window_preview: false,
+            focused_surface: None,
         }
     }
 
@@ -704,7 +740,7 @@ impl<BackendData: Backend + 'static> WayiceState<BackendData> {
                     x11_socket,
                     display_number,
                 } => {
-                    let xwayland_scale = std::env::var("ANVIL_XWAYLAND_SCALE")
+                    let xwayland_scale = std::env::var("WAYICE_XWAYLAND_SCALE")
                         .ok()
                         .and_then(|s| s.parse::<u32>().ok())
                         .unwrap_or(1);
