@@ -1,5 +1,6 @@
 use smithay::wayland::compositor;
 use std::cell::RefCell;
+use x11rb::x11_utils;
 
 #[cfg(feature = "xwayland")]
 use smithay::xwayland::XWaylandClientData;
@@ -12,6 +13,7 @@ use smithay::{
     output::Output,
     reexports::{
         calloop::Interest,
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
             protocol::{wl_buffer::WlBuffer, wl_output, wl_surface::WlSurface},
             Client, Resource,
@@ -119,7 +121,7 @@ impl<BackendData: Backend> CompositorHandler for WayiceState<BackendData> {
                     .buffer
                     .as_ref()
                     .and_then(|assignment| match assignment {
-                        BufferAssignment::NewBuffer(buffer) => get_dmabuf(buffer).cloned().ok(),
+                        BufferAssignment::NewBuffer(buffer) => get_dmabuf(&buffer).cloned().ok(),
                         _ => None,
                     })
             });
@@ -199,26 +201,6 @@ impl<BackendData: Backend> WayiceState<BackendData> {
             .elements()
             .find(|window| window.wl_surface().map(|s| &*s == surface).unwrap_or(false))
             .cloned()
-    }
-
-    pub fn window_data(
-        &self, // Add `&self` to access the `space` field
-        wl_surface: &WlSurface,
-    ) -> Option<(Rectangle<i32, Logical>, i32)> {
-        // Find the window element associated with the given surface
-        let window_element = self
-            .space
-            .elements()
-            .find(|window| window.wl_surface().map(|s| &*s == wl_surface).unwrap_or(false));
-
-        // If a window element is found, extract the data
-        window_element.map(|window| {
-            // Access geometry and z-index
-            let geometry = window.bbox(); // Assuming this method returns the bounding box
-            let z_index = window.z_index() as i32; // Convert u8 to i32
-
-            (geometry, z_index)
-        })
     }
 }
 
@@ -345,39 +327,47 @@ fn place_new_window(
 ) {
     // place the window at a random location on same output as pointer
     // or if there is not output in a [0;800]x[0;800] square
-    use rand::distributions::{Distribution, Uniform};
+    //use rand::distributions::{Distribution, Uniform};
 
-    let output = space
-        .output_under(pointer_location)
-        .next()
-        .or_else(|| space.outputs().next())
-        .cloned();
-    let output_geometry = output
-        .and_then(|o| {
-            let geo = space.output_geometry(&o)?;
-            let map = layer_map_for_output(&o);
-            let zone = map.non_exclusive_zone();
-            Some(Rectangle::from_loc_and_size(geo.loc + zone.loc, zone.size))
-        })
-        .unwrap_or_else(|| Rectangle::from_loc_and_size((0, 0), (800, 800)));
+    // let output = space
+    //     .output_under(pointer_location)
+    //     .next()
+    //     .or_else(|| space.outputs().next())
+    //     .cloned();
+    // let output_geometry = output
+    //     .and_then(|o| {
+    //         let geo = space.output_geometry(&o)?;
+    //         let map = layer_map_for_output(&o);
+    //         let zone = map.non_exclusive_zone();
+    //         Some(Rectangle::from_loc_and_size(geo.loc + zone.loc, zone.size))
+    //     })
+    //     .unwrap_or_else(|| Rectangle::from_loc_and_size((0, 0), (800, 800)));
 
     // set the initial toplevel bounds
     #[allow(irrefutable_let_patterns)]
-    if let Some(toplevel) = window.0.toplevel() {
-        toplevel.with_pending_state(|state| {
-            state.bounds = Some(output_geometry.size);
-        });
+    if window.0.is_wayland() {
+        if let Some(toplevel) = window.0.toplevel() {
+            // The window is a Wayland toplevel
+            toplevel.with_pending_state(|state| {
+                state.states.set(xdg_toplevel::State::Fullscreen);
+            });
+        }
+    } else if window.0.is_x11() {
+        if let Some(xwayland) = window.0.x11_surface() {
+            // The window is an XWayland window
+            xwayland.set_fullscreen(true).unwrap();
+        }
     }
 
-    let max_x = output_geometry.loc.x + (((output_geometry.size.w as f32) / 3.0) * 2.0) as i32;
-    let max_y = output_geometry.loc.y + (((output_geometry.size.h as f32) / 3.0) * 2.0) as i32;
-    let x_range = Uniform::new(output_geometry.loc.x, max_x);
-    let y_range = Uniform::new(output_geometry.loc.y, max_y);
-    let mut rng = rand::thread_rng();
-    let x = x_range.sample(&mut rng);
-    let y = y_range.sample(&mut rng);
+    // let max_x = output_geometry.loc.x + (((output_geometry.size.w as f32) / 3.0) * 2.0) as i32;
+    // let max_y = output_geometry.loc.y + (((output_geometry.size.h as f32) / 3.0) * 2.0) as i32;
+    // let x_range = Uniform::new(output_geometry.loc.x, max_x);
+    // let y_range = Uniform::new(output_geometry.loc.y, max_y);
+    // let mut rng = rand::thread_rng();
+    // let x = x_range.sample(&mut rng);
+    // let y = y_range.sample(&mut rng);
 
-    space.map_element(window.clone(), (x, y), activate);
+    space.map_element(window.clone(), (0, 0), activate);
 }
 
 pub fn fixup_positions(space: &mut Space<WindowElement>, pointer_location: Point<f64, Logical>) {
