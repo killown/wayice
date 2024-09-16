@@ -1,5 +1,9 @@
-use smithay::wayland::compositor;
-use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
+use crate::helpers::window_utils::{get_window_info, get_x11_window_info};
+use crate::ipc::shared_memory::ipc_set_string;
+use crate::{
+    core::state::{Backend, WayiceState},
+    shell::{WindowElement, SSD},
+};
 #[cfg(feature = "xwayland")]
 use smithay::xwayland::X11Surface;
 pub use smithay::{
@@ -34,11 +38,6 @@ use smithay::{
 };
 use std::borrow::Cow;
 
-use crate::{
-    core::state::{Backend, WayiceState},
-    shell::{WindowElement, SSD},
-};
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum KeyboardFocusTarget {
     Window(Window),
@@ -63,38 +62,6 @@ pub enum PointerFocusTarget {
     #[cfg(feature = "xwayland")]
     X11Surface(X11Surface),
     SSD(SSD),
-}
-
-fn get_window_info(wl_surface: &WlSurface) -> String {
-    compositor::with_states(wl_surface, |states| {
-        // Attempt to retrieve the XdgToplevelSurfaceData
-        let role = match states.data_map.get::<XdgToplevelSurfaceData>() {
-            Some(data) => data.lock().unwrap(),
-            None => return "No XdgToplevelSurfaceData found.".to_string(),
-        };
-
-        // Extract relevant fields from XdgToplevelSurfaceData
-        let title = role.title.as_deref().unwrap_or("No Title");
-        let app_id = role.app_id.as_deref().unwrap_or("No App ID");
-        let is_modal = role.modal;
-
-        // Extract parent surface ID or default to "None"
-        let parent_id = role
-            .parent
-            .as_ref()
-            .map(|parent| format!("{}", parent.id())) // Convert to string if parent exists
-            .unwrap_or_else(|| "None".to_string());
-
-        // Format the information as a single string
-        format!(
-            "Title: {} | App ID: {} | Is Modal: {} | Surface ID: {} | Parent: {}",
-            title,
-            app_id,
-            is_modal,
-            wl_surface.id(),
-            parent_id
-        )
-    })
 }
 
 impl IsAlive for PointerFocusTarget {
@@ -123,20 +90,25 @@ impl<BackendData: Backend> PointerTarget<WayiceState<BackendData>> for PointerFo
         data: &mut WayiceState<BackendData>,
         event: &MotionEvent,
     ) {
-        // Match to get the currently focused surface (WlSurface, X11Surface, SSD)
         match self {
             PointerFocusTarget::WlSurface(surface) => {
                 let info = get_window_info(surface);
+                ipc_set_string("/wayice_focused_surface", &info);
+
                 println!("window info: {:?}", info);
                 PointerTarget::enter(surface, seat, data, event);
             }
             #[cfg(feature = "xwayland")]
             PointerFocusTarget::X11Surface(surface) => {
                 println!("View Focused: X11Surface {:?}", surface);
+                let info = get_x11_window_info(surface);
+                ipc_set_string("/wayice_focused_surface", &info);
                 PointerTarget::enter(surface, seat, data, event);
             }
             PointerFocusTarget::SSD(surface) => {
                 println!("View Focused: SSD {:?}", surface);
+                let info = get_window_info(&surface.wl_surface().unwrap());
+                ipc_set_string("/wayice_focused_surface", &info);
                 PointerTarget::enter(surface, seat, data, event);
             }
         }
