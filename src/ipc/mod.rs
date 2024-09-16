@@ -1,2 +1,2 @@
 pub mod server;
-pub mod set_shared_memory;
+pub mod shared_memory;
