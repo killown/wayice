@@ -78,8 +78,8 @@ pub fn ipc_set_string(shm_name: &str, value: &str) {
     // Generate semaphore name based on shared memory name
     let sem_name = generate_sem_name(shm_name);
 
-    // Create or open semaphore with local user-only access (0o600)
-    let sem_fd: *mut sem_t = unsafe { sem_open(sem_name.as_ptr(), libc::O_CREAT | libc::O_RDWR, 0o600, 1) };
+    // Create or open semaphore
+    let sem_fd: *mut sem_t = unsafe { sem_open(sem_name.as_ptr(), libc::O_CREAT | libc::O_RDWR, 0o666, 1) };
     if sem_fd.is_null() {
         eprintln!("Failed to open or create semaphore");
         return;
@@ -94,9 +94,9 @@ pub fn ipc_set_string(shm_name: &str, value: &str) {
         }
     }
 
-    // Create or open shared memory object with local user-only access (0o600)
+    // Create or open shared memory object
     let shm_name = CString::new(shm_name).unwrap();
-    let shm_fd = unsafe { shm_open(shm_name.as_ptr(), O_CREAT | O_RDWR, 0o600) };
+    let shm_fd = unsafe { shm_open(shm_name.as_ptr(), libc::O_CREAT | libc::O_RDWR, 0o666) };
     if shm_fd == -1 {
         eprintln!("Failed to open shared memory");
         unsafe { sem_post(sem_fd) }; // Release semaphore
