@@ -1,5 +1,10 @@
 use crate::core::state::{Backend, WayiceState};
 use crate::helpers::window_utils::{get_window_info, get_x11_window_info};
+use libc::sem_t;
+use libc::{
+    close, ftruncate, mmap, munmap, sem_close, sem_open, sem_post, sem_wait, shm_open, MAP_FAILED,
+    MAP_SHARED, O_CREAT, O_RDWR, PROT_READ, PROT_WRITE,
+};
 use serde_json::json;
 use std::ffi::CString;
 use std::ptr;
@@ -64,64 +69,82 @@ use std::ptr;
 /// ipc_set_string(shm_name, value);
 /// ```
 
+fn generate_sem_name(shm_name: &str) -> CString {
+    let sem_name = format!("/semaphore_{}", shm_name.trim_start_matches('/'));
+    CString::new(sem_name).unwrap()
+}
+
 pub fn ipc_set_string(shm_name: &str, value: &str) {
-    // create the shared memory object
-    let shm_fd = unsafe {
-        libc::shm_open(
-            CString::new(shm_name).unwrap().as_ptr(),
-            libc::O_CREAT | libc::O_RDWR,
-            0o666,
-        )
-    };
+    // Generate semaphore name based on shared memory name
+    let sem_name = generate_sem_name(shm_name);
 
+    // Create or open semaphore with local user-only access (0o600)
+    let sem_fd: *mut sem_t = unsafe { sem_open(sem_name.as_ptr(), libc::O_CREAT | libc::O_RDWR, 0o600, 1) };
+    if sem_fd.is_null() {
+        eprintln!("Failed to open or create semaphore");
+        return;
+    }
+
+    // Acquire semaphore
+    unsafe {
+        if sem_wait(sem_fd) == -1 {
+            eprintln!("Failed to acquire semaphore");
+            sem_close(sem_fd);
+            return;
+        }
+    }
+
+    // Create or open shared memory object with local user-only access (0o600)
+    let shm_name = CString::new(shm_name).unwrap();
+    let shm_fd = unsafe { shm_open(shm_name.as_ptr(), O_CREAT | O_RDWR, 0o600) };
     if shm_fd == -1 {
-        eprintln!("Failed to open or create shared memory");
+        eprintln!("Failed to open shared memory");
+        unsafe { sem_post(sem_fd) }; // Release semaphore
+        unsafe { sem_close(sem_fd) };
         return;
     }
 
-    // Truncate the shared memory to zero size to clear the old value
-    if unsafe { libc::ftruncate(shm_fd, 0) } == -1 {
-        eprintln!("Failed to truncate shared memory");
-        unsafe { libc::close(shm_fd) };
-        return;
-    }
-
-    // Set the new size of the shared memory object
+    // Set size of shared memory
     let size = value.len() + 1; // Include space for null terminator
-    if unsafe { libc::ftruncate(shm_fd, size as libc::off_t) } == -1 {
+    if unsafe { ftruncate(shm_fd, size as libc::off_t) } == -1 {
         eprintln!("Failed to set size of shared memory");
-        unsafe { libc::close(shm_fd) };
+        unsafe { close(shm_fd) };
+        unsafe { sem_post(sem_fd) }; // Release semaphore
+        unsafe { sem_close(sem_fd) };
         return;
     }
 
-    // Map the shared memory object into memory
+    // Map shared memory
     let mapped_mem = unsafe {
-        libc::mmap(
+        mmap(
             ptr::null_mut(),
             size,
-            libc::PROT_READ | libc::PROT_WRITE,
-            libc::MAP_SHARED,
+            PROT_READ | PROT_WRITE,
+            MAP_SHARED,
             shm_fd,
             0,
         )
     };
-
-    if mapped_mem == libc::MAP_FAILED {
+    if mapped_mem == MAP_FAILED {
         eprintln!("Failed to map shared memory");
-        unsafe { libc::close(shm_fd) };
+        unsafe { close(shm_fd) };
+        unsafe { sem_post(sem_fd) }; // Release semaphore
+        unsafe { sem_close(sem_fd) };
         return;
     }
 
-    // Write the string to the shared memory
+    // Write to shared memory
     unsafe {
         let mem_ptr = mapped_mem as *mut u8;
         ptr::copy_nonoverlapping(value.as_ptr(), mem_ptr, value.len());
-        *(mem_ptr.add(value.len())) = 0; // Null-terminate the string
+        *(mem_ptr.add(value.len())) = 0; // Null-terminate
     }
 
     // Clean up
-    unsafe { libc::munmap(mapped_mem, size) };
-    unsafe { libc::close(shm_fd) };
+    unsafe { munmap(mapped_mem, size) };
+    unsafe { close(shm_fd) };
+    unsafe { sem_post(sem_fd) }; // Release semaphore
+    unsafe { sem_close(sem_fd) }; // Close semaphore
 }
 
 impl<BackendData: Backend> WayiceState<BackendData> {
