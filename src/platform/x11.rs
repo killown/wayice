@@ -120,7 +120,7 @@ pub fn run_x11() {
         .build(&handle)
         .expect("Failed to create first window");
 
-    let skip_vulkan = std::env::var("ANVIL_NO_VULKAN")
+    let skip_vulkan = std::env::var("WAYICE_NO_VULKAN")
         .map(|x| {
             x == "1" || x.to_lowercase() == "true" || x.to_lowercase() == "yes" || x.to_lowercase() == "y"
         })

@@ -1,5 +1,6 @@
+use crate::helpers::output_utils;
 use crate::ipc::server::start_ipc_server;
-
+use crate::ipc::shared_memory::ipc_set_string;
 use std::{
     sync::{atomic::Ordering, Mutex},
     time::Duration,
@@ -437,6 +438,8 @@ pub fn run_winit() {
             state.popups.cleanup();
             display_handle.flush_clients().unwrap();
         }
+        // add to the shared memory a list of all display outputs rendered
+        ipc_set_string("/wayice-output-list", &state.list_all_outputs());
 
         #[cfg(feature = "debug")]
         state.backend_data.fps.tick();

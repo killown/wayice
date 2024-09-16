@@ -1,5 +1,4 @@
-use std::cell::RefCell;
-
+use crate::ipc::shared_memory;
 use smithay::{
     desktop::{
         find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, space::SpaceElement,
@@ -25,6 +24,7 @@ use smithay::{
         },
     },
 };
+use std::cell::RefCell;
 use tracing::{trace, warn};
 
 use crate::{
@@ -53,6 +53,7 @@ impl<BackendData: Backend> XdgShellHandler for WayiceState<BackendData> {
         compositor::add_post_commit_hook(surface.wl_surface(), |state: &mut Self, _, surface| {
             handle_toplevel_commit(&mut state.space, surface);
         });
+        self.ipc_shm_update_window_list();
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {

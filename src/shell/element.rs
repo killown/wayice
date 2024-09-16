@@ -196,6 +196,10 @@ impl<BackendData: Backend> PointerTarget<WayiceState<BackendData>> for SSD {
         let mut state = self.0.decoration_state();
         if state.is_ssd {
             state.header_bar.clicked(seat, data, &self.0, event.serial);
+            let modifiers: Option<smithay::input::keyboard::ModifiersState> = None;
+            state
+                .header_bar
+                .pointer_down_with_alt(seat, data, &self.0, event.serial, modifiers);
         }
     }
     fn axis(

@@ -226,7 +226,7 @@ pub fn run_udev() {
     /*
      * Initialize the compositor
      */
-    let primary_gpu = if let Ok(var) = std::env::var("ANVIL_DRM_DEVICE") {
+    let primary_gpu = if let Ok(var) = std::env::var("WAYICE_DRM_DEVICE") {
         DrmNode::from_path(var).expect("Invalid drm device path")
     } else {
         primary_gpu(session.seat())
@@ -996,13 +996,13 @@ impl WayiceState<UdevData> {
                 GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
             );
 
-            let color_formats = if std::env::var("ANVIL_DISABLE_10BIT").is_ok() {
+            let color_formats = if std::env::var("WAYICE_DISABLE_10BIT").is_ok() {
                 SUPPORTED_FORMATS_8BIT_ONLY
             } else {
                 SUPPORTED_FORMATS
             };
 
-            let compositor = if std::env::var("ANVIL_DISABLE_DRM_COMPOSITOR").is_ok() {
+            let compositor = if std::env::var("WAYICE_DISABLE_DRM_COMPOSITOR").is_ok() {
                 let gbm_surface =
                     match GbmBufferedSurface::new(surface, allocator, color_formats, render_formats) {
                         Ok(renderer) => renderer,
@@ -1057,7 +1057,7 @@ impl WayiceState<UdevData> {
                 };
                 compositor.set_debug_flags(self.backend_data.debug_flags);
 
-                let disable_direct_scanout = std::env::var("ANVIL_DISABLE_DIRECT_SCANOUT").is_ok();
+                let disable_direct_scanout = std::env::var("WAYICE_DISABLE_DIRECT_SCANOUT").is_ok();
                 compositor.use_direct_scanout(!disable_direct_scanout);
                 SurfaceComposition::Compositor(compositor)
             };

@@ -7,6 +7,7 @@
 )]
 
 pub mod core;
+pub mod helpers;
 pub mod ipc;
 pub mod platform;
 pub mod shell;
