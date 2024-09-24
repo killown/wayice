@@ -30,7 +30,7 @@ use smithay::{
     },
     input::{
         keyboard::{Keysym, LedState, XkbConfig},
-        pointer::{CursorImageStatus, PointerHandle},
+        pointer::{CursorImageStatus, CursorImageSurfaceData, PointerHandle},
         Seat, SeatHandler, SeatState,
     },
     output::Output,
@@ -45,7 +45,7 @@ use smithay::{
             Display, DisplayHandle, Resource,
         },
     },
-    utils::{Clock, Monotonic, Rectangle},
+    utils::{Clock, Logical, Monotonic, Point, Rectangle},
     wayland::{
         compositor::{get_parent, with_states, CompositorClientState, CompositorState},
         dmabuf::DmabufFeedback,
@@ -76,7 +76,7 @@ use smithay::{
             wlr_layer::WlrLayerShellState,
             xdg::{
                 decoration::{XdgDecorationHandler, XdgDecorationState},
-                ToplevelSurface, XdgShellState, XdgToplevelSurfaceData,
+                ToplevelSurface, XdgShellState,
             },
         },
         shm::{ShmHandler, ShmState},
@@ -102,7 +102,7 @@ use crate::{
 #[cfg(feature = "xwayland")]
 use smithay::{
     delegate_xwayland_keyboard_grab, delegate_xwayland_shell,
-    utils::{Point, Size},
+    utils::Size,
     wayland::selection::{SelectionSource, SelectionTarget},
     wayland::xwayland_keyboard_grab::{XWaylandKeyboardGrabHandler, XWaylandKeyboardGrabState},
     wayland::xwayland_shell,
@@ -154,7 +154,7 @@ pub struct WayiceState<BackendData: Backend + 'static> {
     pub xwayland_shell_state: xwayland_shell::XWaylandShellState,
     pub single_pixel_buffer_state: SinglePixelBufferState,
 
-    pub dnd_icon: Option<WlSurface>,
+    pub dnd_icon: Option<DndIcon>,
 
     // input-related fields
     pub suppressed_keys: Vec<Keysym>,
@@ -176,6 +176,12 @@ pub struct WayiceState<BackendData: Backend + 'static> {
     pub focused_surface: Option<wayland_server::protocol::wl_surface::WlSurface>,
 }
 
+#[derive(Debug)]
+pub struct DndIcon {
+    pub surface: WlSurface,
+    pub offset: Point<i32, Logical>,
+}
+
 delegate_compositor!(@<BackendData: Backend + 'static> WayiceState<BackendData>);
 
 impl<BackendData: Backend> DataDeviceHandler for WayiceState<BackendData> {
@@ -186,7 +192,21 @@ impl<BackendData: Backend> DataDeviceHandler for WayiceState<BackendData> {
 
 impl<BackendData: Backend> ClientDndGrabHandler for WayiceState<BackendData> {
     fn started(&mut self, _source: Option<WlDataSource>, icon: Option<WlSurface>, _seat: Seat<Self>) {
-        self.dnd_icon = icon;
+        let offset = if let CursorImageStatus::Surface(ref surface) = self.cursor_status {
+            with_states(surface, |states| {
+                let hotspot = states
+                    .data_map
+                    .get::<CursorImageSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .hotspot;
+                Point::from((-hotspot.x, -hotspot.y))
+            })
+        } else {
+            (0, 0).into()
+        };
+        self.dnd_icon = icon.map(|surface| DndIcon { surface, offset });
     }
     fn dropped(&mut self, _seat: Seat<Self>) {
         self.dnd_icon = None;
@@ -408,17 +428,7 @@ impl<BackendData: Backend> XdgDecorationHandler for WayiceState<BackendData> {
                 _ => Mode::ClientSide,
             });
         });
-
-        let initial_configure_sent = with_states(toplevel.wl_surface(), |states| {
-            states
-                .data_map
-                .get::<XdgToplevelSurfaceData>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
-        });
-        if initial_configure_sent {
+        if toplevel.is_initial_configure_sent() {
             toplevel.send_pending_configure();
         }
     }
@@ -427,16 +437,7 @@ impl<BackendData: Backend> XdgDecorationHandler for WayiceState<BackendData> {
         toplevel.with_pending_state(|state| {
             state.decoration_mode = Some(Mode::ClientSide);
         });
-        let initial_configure_sent = with_states(toplevel.wl_surface(), |states| {
-            states
-                .data_map
-                .get::<XdgToplevelSurfaceData>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
-        });
-        if initial_configure_sent {
+        if toplevel.is_initial_configure_sent() {
             toplevel.send_pending_configure();
         }
     }

@@ -1,7 +1,7 @@
-use smithay::wayland::compositor;
 use std::cell::RefCell;
-use x11rb::x11_utils;
 
+#[cfg(feature = "udev")]
+use smithay::wayland::drm_syncobj::DrmSyncobjCachedState;
 #[cfg(feature = "xwayland")]
 use smithay::xwayland::XWaylandClientData;
 use smithay::{
@@ -10,15 +10,14 @@ use smithay::{
         layer_map_for_output, space::SpaceElement, LayerSurface, PopupKind, PopupManager, Space,
         WindowSurfaceType,
     },
+    input::pointer::{CursorImageStatus, CursorImageSurfaceData},
     output::Output,
     reexports::{
         calloop::Interest,
-        wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
             protocol::{wl_buffer::WlBuffer, wl_output, wl_surface::WlSurface},
             Client, Resource,
         },
-        winit::window::{WindowAttributes, WindowId},
     },
     utils::{IsAlive, Logical, Point, Rectangle, Size},
     wayland::{
@@ -34,11 +33,10 @@ use smithay::{
                 Layer, LayerSurface as WlrLayerSurface, LayerSurfaceData, WlrLayerShellHandler,
                 WlrLayerShellState,
             },
-            xdg::{XdgPopupSurfaceData, XdgToplevelSurfaceData},
+            xdg::XdgToplevelSurfaceData,
         },
     },
 };
-use tracing::span::Id;
 
 use crate::core::state::{Backend, ClientState, WayiceState};
 
@@ -113,7 +111,17 @@ impl<BackendData: Backend> CompositorHandler for WayiceState<BackendData> {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
+            #[cfg(feature = "udev")]
+            let mut acquire_point = None;
             let maybe_dmabuf = with_states(surface, |surface_data| {
+                #[cfg(feature = "udev")]
+                acquire_point.clone_from(
+                    &surface_data
+                        .cached_state
+                        .get::<DrmSyncobjCachedState>()
+                        .pending()
+                        .acquire_point,
+                );
                 surface_data
                     .cached_state
                     .get::<SurfaceAttributes>()
@@ -126,6 +134,21 @@ impl<BackendData: Backend> CompositorHandler for WayiceState<BackendData> {
                     })
             });
             if let Some(dmabuf) = maybe_dmabuf {
+                #[cfg(feature = "udev")]
+                if let Some(acquire_point) = acquire_point {
+                    if let Ok((blocker, source)) = acquire_point.generate_blocker() {
+                        let client = surface.client().unwrap();
+                        let res = state.handle.insert_source(source, move |_, _, data| {
+                            let dh = data.display_handle.clone();
+                            data.client_compositor_state(&client).blocker_cleared(data, &dh);
+                            Ok(())
+                        });
+                        if res.is_ok() {
+                            add_blocker(surface, blocker);
+                            return;
+                        }
+                    }
+                }
                 if let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) {
                     if let Some(client) = surface.client() {
                         let res = state.handle.insert_source(source, move |_, _, data| {
@@ -153,9 +176,61 @@ impl<BackendData: Backend> CompositorHandler for WayiceState<BackendData> {
             }
             if let Some(window) = self.window_for_surface(&root) {
                 window.0.on_commit();
+                if &root == surface {
+                    let buffer_offset = with_states(surface, |states| {
+                        states
+                            .cached_state
+                            .get::<SurfaceAttributes>()
+                            .current()
+                            .buffer_delta
+                            .take()
+                    });
+
+                    if let Some(buffer_offset) = buffer_offset {
+                        let current_loc = self.space.element_location(&window).unwrap();
+                        self.space.map_element(window, current_loc + buffer_offset, false);
+                    }
+                }
             }
         }
         self.popups.commit(surface);
+
+        if matches!(&self.cursor_status, CursorImageStatus::Surface(cursor_surface) if cursor_surface == surface)
+        {
+            with_states(surface, |states| {
+                let cursor_image_attributes = states.data_map.get::<CursorImageSurfaceData>();
+
+                if let Some(mut cursor_image_attributes) =
+                    cursor_image_attributes.map(|attrs| attrs.lock().unwrap())
+                {
+                    let buffer_delta = states
+                        .cached_state
+                        .get::<SurfaceAttributes>()
+                        .current()
+                        .buffer_delta
+                        .take();
+                    if let Some(buffer_delta) = buffer_delta {
+                        tracing::trace!(hotspot = ?cursor_image_attributes.hotspot, ?buffer_delta, "decrementing cursor hotspot");
+                        cursor_image_attributes.hotspot -= buffer_delta;
+                    }
+                }
+            });
+        }
+
+        if matches!(&self.dnd_icon, Some(icon) if &icon.surface == surface) {
+            let dnd_icon = self.dnd_icon.as_mut().unwrap();
+            with_states(&dnd_icon.surface, |states| {
+                let buffer_delta = states
+                    .cached_state
+                    .get::<SurfaceAttributes>()
+                    .current()
+                    .buffer_delta
+                    .take()
+                    .unwrap_or_default();
+                tracing::trace!(offset = ?dnd_icon.offset, ?buffer_delta, "moving dnd offset");
+                dnd_icon.offset += buffer_delta;
+            });
+        }
 
         ensure_initial_configure(surface, &self.space, &mut self.popups)
     }
@@ -270,16 +345,7 @@ fn ensure_initial_configure(surface: &WlSurface, space: &Space<WindowElement>, p
             }
         };
 
-        let initial_configure_sent = with_states(surface, |states| {
-            states
-                .data_map
-                .get::<XdgPopupSurfaceData>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
-        });
-        if !initial_configure_sent {
+        if !popup.is_initial_configure_sent() {
             // NOTE: This should never fail as the initial configure is always
             // allowed.
             popup.send_configure().expect("initial configure failed");
@@ -327,47 +393,47 @@ fn place_new_window(
 ) {
     // place the window at a random location on same output as pointer
     // or if there is not output in a [0;800]x[0;800] square
-    //use rand::distributions::{Distribution, Uniform};
+    use rand::distributions::{Distribution, Uniform};
 
-    // let output = space
-    //     .output_under(pointer_location)
-    //     .next()
-    //     .or_else(|| space.outputs().next())
-    //     .cloned();
-    // let output_geometry = output
-    //     .and_then(|o| {
-    //         let geo = space.output_geometry(&o)?;
-    //         let map = layer_map_for_output(&o);
-    //         let zone = map.non_exclusive_zone();
-    //         Some(Rectangle::from_loc_and_size(geo.loc + zone.loc, zone.size))
-    //     })
-    //     .unwrap_or_else(|| Rectangle::from_loc_and_size((0, 0), (800, 800)));
+    let output = space
+        .output_under(pointer_location)
+        .next()
+        .or_else(|| space.outputs().next())
+        .cloned();
+    let output_geometry = output
+        .and_then(|o| {
+            let geo = space.output_geometry(&o)?;
+            let map = layer_map_for_output(&o);
+            let zone = map.non_exclusive_zone();
+            Some(Rectangle::from_loc_and_size(geo.loc + zone.loc, zone.size))
+        })
+        .unwrap_or_else(|| Rectangle::from_loc_and_size((0, 0), (800, 800)));
 
     // set the initial toplevel bounds
-    #[allow(irrefutable_let_patterns)]
-    if window.0.is_wayland() {
-        if let Some(toplevel) = window.0.toplevel() {
-            // The window is a Wayland toplevel
-            toplevel.with_pending_state(|state| {
-                state.states.set(xdg_toplevel::State::Fullscreen);
-            });
-        }
-    } else if window.0.is_x11() {
-        if let Some(xwayland) = window.0.x11_surface() {
-            // The window is an XWayland window
-            xwayland.set_fullscreen(true).unwrap();
-        }
-    }
+    //#[allow(irrefutable_let_patterns)]
+    // if window.0.is_wayland() {
+    //     if let Some(toplevel) = window.0.toplevel() {
+    //         // The window is a Wayland toplevel
+    //         toplevel.with_pending_state(|state| {
+    //             state.states.set(xdg_toplevel::State::Fullscreen);
+    //         });
+    //     }
+    // } else if window.0.is_x11() {
+    //     if let Some(xwayland) = window.0.x11_surface() {
+    //         // The window is an XWayland window
+    //         xwayland.set_fullscreen(true).unwrap();
+    //     }
+    // }
 
-    // let max_x = output_geometry.loc.x + (((output_geometry.size.w as f32) / 3.0) * 2.0) as i32;
-    // let max_y = output_geometry.loc.y + (((output_geometry.size.h as f32) / 3.0) * 2.0) as i32;
-    // let x_range = Uniform::new(output_geometry.loc.x, max_x);
-    // let y_range = Uniform::new(output_geometry.loc.y, max_y);
-    // let mut rng = rand::thread_rng();
-    // let x = x_range.sample(&mut rng);
-    // let y = y_range.sample(&mut rng);
+    let max_x = output_geometry.loc.x + (((output_geometry.size.w as f32) / 3.0) * 2.0) as i32;
+    let max_y = output_geometry.loc.y + (((output_geometry.size.h as f32) / 3.0) * 2.0) as i32;
+    let x_range = Uniform::new(output_geometry.loc.x, max_x);
+    let y_range = Uniform::new(output_geometry.loc.y, max_y);
+    let mut rng = rand::thread_rng();
+    let x = x_range.sample(&mut rng);
+    let y = y_range.sample(&mut rng);
 
-    space.map_element(window.clone(), (0, 0), activate);
+    space.map_element(window.clone(), (x, y), activate);
 }
 
 pub fn fixup_positions(space: &mut Space<WindowElement>, pointer_location: Point<f64, Logical>) {

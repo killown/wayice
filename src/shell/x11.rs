@@ -67,7 +67,8 @@ impl<BackendData: Backend> XwmHandler for WayiceState<BackendData> {
         let Some(xsurface) = window.0.x11_surface() else {
             unreachable!()
         };
-        xsurface.configure(Some(bbox)).unwrap();
+        xsurface.set_fullscreen(true).unwrap();
+        //xsurface.configure(Some(bbox)).unwrap();
         window.set_ssd(!xsurface.is_decorated());
     }
 

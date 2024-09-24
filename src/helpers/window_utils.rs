@@ -1,15 +1,23 @@
+use crate::shell::WindowElement;
 use serde_json::{json, Value};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
 use smithay::xwayland::X11Surface;
 pub use smithay::{
     backend::input::KeyState,
+    desktop::space::{
+        constrain_space_element, ConstrainBehavior, ConstrainReference, Space, SpaceRenderElements,
+    },
+    desktop::{
+        space::SpaceElement, utils::OutputPresentationFeedback, Window, WindowSurface, WindowSurfaceType,
+    },
     desktop::{LayerSurface, PopupKind},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent},
         Seat,
     },
+    output::Output,
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Resource},
     reexports::{
         calloop::Interest,
@@ -35,6 +43,7 @@ pub fn get_window_info(wl_surface: &WlSurface) -> String {
         let title = role.title.as_deref().unwrap_or("No Title");
         let app_id = role.app_id.as_deref().unwrap_or("No App ID");
         let is_modal = role.modal;
+
         let parent_id = role
             .parent
             .as_ref()

@@ -1,12 +1,4 @@
-use std::{
-    collections::hash_map::HashMap,
-    io,
-    path::Path,
-    sync::{atomic::Ordering, Mutex},
-    time::{Duration, Instant},
-};
-
-use crate::core::state::SurfaceDmabufFeedback;
+use crate::core::state::{DndIcon, SurfaceDmabufFeedback};
 use crate::{
     core::drawing::*,
     core::render::*,
@@ -25,6 +17,7 @@ use smithay::{
             dmabuf::Dmabuf,
             format::FormatSet,
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
+            vulkan::{ImageUsageFlags, VulkanAllocator},
             Fourcc,
         },
         drm::{
@@ -85,11 +78,19 @@ use smithay::{
         drm_lease::{
             DrmLease, DrmLeaseBuilder, DrmLeaseHandler, DrmLeaseRequest, DrmLeaseState, LeaseRejected,
         },
+        drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjHandler, DrmSyncobjState},
     },
 };
 use smithay_drm_extras::{
+    display_info,
     drm_scanner::{DrmScanEvent, DrmScanner},
-    edid::EdidInfo,
+};
+use std::{
+    collections::hash_map::HashMap,
+    io,
+    path::Path,
+    sync::{atomic::Ordering, Mutex},
+    time::{Duration, Instant},
 };
 use tracing::{debug, error, info, trace, warn};
 
@@ -124,6 +125,7 @@ pub struct UdevData {
     pub session: LibSeatSession,
     dh: DisplayHandle,
     dmabuf_state: Option<(DmabufState, DmabufGlobal)>,
+    syncobj_state: Option<DrmSyncobjState>,
     primary_gpu: DrmNode,
     gpus: GpuManager<GbmGlesBackend<GlesRenderer, DrmDeviceFd>>,
     backends: HashMap<DrmNode, BackendData>,
@@ -247,6 +249,7 @@ pub fn run_udev() {
     let data = UdevData {
         dh: display_handle.clone(),
         dmabuf_state: None,
+        syncobj_state: None,
         session,
         primary_gpu,
         gpus,
@@ -434,6 +437,22 @@ pub fn run_udev() {
         });
     });
 
+    // Expose syncobj protocol if supported by primary GPU
+    if let Some(primary_node) = state
+        .backend_data
+        .primary_gpu
+        .node_with_type(NodeType::Primary)
+        .and_then(|x| x.ok())
+    {
+        if let Some(backend) = state.backend_data.backends.get(&primary_node) {
+            let import_device = backend.drm.device_fd().clone();
+            if supports_syncobj_eventfd(&import_device) {
+                let syncobj_state =
+                    DrmSyncobjState::new::<WayiceState<UdevData>>(&display_handle, import_device);
+                state.backend_data.syncobj_state = Some(syncobj_state);
+            }
+        }
+    }
     event_loop
         .handle()
         .insert_source(udev_backend, move |event, _, data| match event {
@@ -552,6 +571,14 @@ impl DrmLeaseHandler for WayiceState<UdevData> {
 }
 
 delegate_drm_lease!(WayiceState<UdevData>);
+
+impl DrmSyncobjHandler for WayiceState<UdevData> {
+    fn drm_syncobj_state(&mut self) -> &mut DrmSyncobjState {
+        self.backend_data.syncobj_state.as_mut().unwrap()
+    }
+}
+
+smithay::delegate_drm_syncobj!(WayiceState<UdevData>);
 
 pub type RenderSurface = GbmBufferedSurface<GbmAllocator<DrmDeviceFd>, Option<OutputPresentationFeedback>>;
 
@@ -929,9 +956,16 @@ impl WayiceState<UdevData> {
             })
             .unwrap_or(false);
 
-        let (make, model) = EdidInfo::for_connector(&device.drm, connector.handle())
-            .map(|info| (info.manufacturer, info.model))
-            .unwrap_or_else(|| ("Unknown".into(), "Unknown".into()));
+        let display_info = display_info::for_connector(&device.drm, connector.handle());
+        let make = display_info
+            .as_ref()
+            .and_then(|info| info.make())
+            .unwrap_or_else(|| "Unknown".into());
+
+        let model = display_info
+            .as_ref()
+            .and_then(|info| info.model())
+            .unwrap_or_else(|| "Unknown".into());
 
         if non_desktop {
             info!("Connector {} is non-desktop, setting up for leasing", output_name);
@@ -961,6 +995,7 @@ impl WayiceState<UdevData> {
                 }
             };
 
+            // change here for wayice.ini support
             let (phys_w, phys_h) = connector.size().unwrap_or((0, 0));
             let output = Output::new(
                 output_name,
@@ -1559,7 +1594,7 @@ fn render_surface<'a>(
     pointer_location: Point<f64, Logical>,
     pointer_image: &MemoryRenderBuffer,
     pointer_element: &mut PointerElement,
-    dnd_icon: &Option<wl_surface::WlSurface>,
+    dnd_icon: &Option<DndIcon>,
     cursor_status: &mut CursorImageStatus,
     clock: &Clock<Monotonic>,
     show_window_preview: bool,
@@ -1583,8 +1618,7 @@ fn render_surface<'a>(
         } else {
             (0, 0).into()
         };
-        let cursor_pos = pointer_location - output_geometry.loc.to_f64() - cursor_hotspot.to_f64();
-        let cursor_pos_scaled = cursor_pos.to_physical(scale).to_i32_round();
+        let cursor_pos = pointer_location - output_geometry.loc.to_f64();
 
         // set cursor
         pointer_element.set_buffer(pointer_image.clone());
@@ -1603,16 +1637,28 @@ fn render_surface<'a>(
             pointer_element.set_status(cursor_status.clone());
         }
 
-        custom_elements.extend(pointer_element.render_elements(renderer, cursor_pos_scaled, scale, 1.0));
+        custom_elements.extend(
+            pointer_element.render_elements(
+                renderer,
+                (cursor_pos - cursor_hotspot.to_f64())
+                    .to_physical(scale)
+                    .to_i32_round(),
+                scale,
+                1.0,
+            ),
+        );
 
         // draw the dnd icon if applicable
         {
-            if let Some(wl_surface) = dnd_icon.as_ref() {
-                if wl_surface.alive() {
+            if let Some(icon) = dnd_icon.as_ref() {
+                let dnd_icon_pos = (cursor_pos + icon.offset.to_f64())
+                    .to_physical(scale)
+                    .to_i32_round();
+                if icon.surface.alive() {
                     custom_elements.extend(AsRenderElements::<UdevRenderer<'a>>::render_elements(
-                        &SurfaceTree::from_surface(wl_surface),
+                        &SurfaceTree::from_surface(&icon.surface),
                         renderer,
-                        cursor_pos_scaled,
+                        dnd_icon_pos,
                         scale,
                         1.0,
                     ));

@@ -94,7 +94,6 @@ impl<BackendData: Backend> PointerTarget<WayiceState<BackendData>> for PointerFo
             PointerFocusTarget::WlSurface(surface) => {
                 let info = get_window_info(surface);
                 ipc_set_string("/wayice_focused_surface", &info);
-
                 println!("window info: {:?}", info);
                 PointerTarget::enter(surface, seat, data, event);
             }

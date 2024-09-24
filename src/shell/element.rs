@@ -196,10 +196,7 @@ impl<BackendData: Backend> PointerTarget<WayiceState<BackendData>> for SSD {
         let mut state = self.0.decoration_state();
         if state.is_ssd {
             state.header_bar.clicked(seat, data, &self.0, event.serial);
-            let modifiers: Option<smithay::input::keyboard::ModifiersState> = None;
-            state
-                .header_bar
-                .pointer_down_with_alt(seat, data, &self.0, event.serial, modifiers);
+            state.header_bar.touch_down(seat, data, &self.0, event.serial);
         }
     }
     fn axis(
@@ -395,7 +392,6 @@ impl SpaceElement for WindowElement {
     fn output_leave(&self, output: &Output) {
         SpaceElement::output_leave(&self.0, output);
     }
-    #[profiling::function]
     fn refresh(&self) {
         SpaceElement::refresh(&self.0);
     }

@@ -32,10 +32,7 @@ use smithay::{
         compositor::with_states,
         input_method::InputMethodSeat,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
-        shell::{
-            wlr_layer::{KeyboardInteractivity, Layer as WlrLayer, LayerSurfaceCachedState},
-            xdg::XdgToplevelSurfaceData,
-        },
+        shell::wlr_layer::{KeyboardInteractivity, Layer as WlrLayer, LayerSurfaceCachedState},
     },
 };
 
@@ -127,16 +124,7 @@ impl<BackendData: Backend> WayiceState<BackendData> {
                                 false
                             }
                         });
-                        let initial_configure_sent = with_states(toplevel.wl_surface(), |states| {
-                            states
-                                .data_map
-                                .get::<XdgToplevelSurfaceData>()
-                                .unwrap()
-                                .lock()
-                                .unwrap()
-                                .initial_configure_sent
-                        });
-                        if mode_changed && initial_configure_sent {
+                        if mode_changed && toplevel.is_initial_configure_sent() {
                             toplevel.send_pending_configure();
                         }
                     }
@@ -153,7 +141,7 @@ impl<BackendData: Backend> WayiceState<BackendData> {
     fn keyboard_key_to_action<B: InputBackend>(&mut self, evt: B::KeyboardKeyEvent) -> KeyAction {
         let keycode = evt.key_code();
         let state = evt.state();
-        debug!(keycode, ?state, "key");
+        debug!(?keycode, ?state, "key");
         let serial = SCOUNTER.next_serial();
         let time = Event::time_msec(&evt);
         let mut suppressed_keys = self.suppressed_keys.clone();
@@ -576,7 +564,7 @@ impl<BackendData: Backend> WayiceState<BackendData> {
         for keycode in keyboard.pressed_keys() {
             keyboard.input(
                 self,
-                keycode.raw(),
+                keycode,
                 KeyState::Released,
                 SCOUNTER.next_serial(),
                 0,

@@ -104,38 +104,6 @@ impl HeaderBar {
         };
     }
 
-    pub fn pointer_down_with_alt<BackendData: Backend>(
-        &mut self,
-        seat: &Seat<WayiceState<BackendData>>,
-        state: &mut WayiceState<BackendData>,
-        window: &WindowElement,
-        serial: Serial,
-        modifiers: Option<smithay::input::keyboard::ModifiersState>,
-    ) {
-        // Check if logo key is pressed
-        if let Some(modifiers) = modifiers {
-            if modifiers.logo {
-                match window.0.underlying_surface() {
-                    WindowSurface::Wayland(w) => {
-                        let seat = seat.clone();
-                        let toplevel = w.clone();
-                        // Initiate window move request
-                        state
-                            .handle
-                            .insert_idle(move |data| data.move_request_xdg(&toplevel, &seat, serial));
-                    }
-                    #[cfg(feature = "xwayland")]
-                    WindowSurface::X11(w) => {
-                        let window = w.clone();
-                        state
-                            .handle
-                            .insert_idle(move |data| data.move_request_x11(&window));
-                    }
-                };
-            }
-        }
-    }
-
     pub fn touch_down<BackendData: Backend>(
         &mut self,
         seat: &Seat<WayiceState<BackendData>>,
@@ -168,34 +136,6 @@ impl HeaderBar {
         };
     }
 
-    fn handle_pointer_down<BackendData: Backend>(
-        seat: &Seat<WayiceState<BackendData>>,
-        state: &mut WayiceState<BackendData>,
-        window: &WindowElement,
-        serial: Serial,
-        modifiers: Option<smithay::input::keyboard::ModifiersState>, // Optional modifiers argument
-    ) {
-        if let Some(modifiers) = modifiers {
-            if modifiers.alt {
-                match window.0.underlying_surface() {
-                    WindowSurface::Wayland(w) => {
-                        let seat = seat.clone();
-                        let toplevel = w.clone();
-                        state
-                            .handle
-                            .insert_idle(move |data| data.move_request_xdg(&toplevel, &seat, serial));
-                    }
-                    #[cfg(feature = "xwayland")]
-                    WindowSurface::X11(w) => {
-                        let window = w.clone();
-                        state
-                            .handle
-                            .insert_idle(move |data| data.move_request_x11(&window));
-                    }
-                }
-            }
-        }
-    }
     pub fn touch_up<BackendData: Backend>(
         &mut self,
         _seat: &Seat<WayiceState<BackendData>>,

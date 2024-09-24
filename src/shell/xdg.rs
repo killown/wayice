@@ -53,6 +53,8 @@ impl<BackendData: Backend> XdgShellHandler for WayiceState<BackendData> {
         compositor::add_post_commit_hook(surface.wl_surface(), |state: &mut Self, _, surface| {
             handle_toplevel_commit(&mut state.space, surface);
         });
+
+        // ipc update
         self.ipc_shm_update_window_list();
     }
 
@@ -312,7 +314,11 @@ impl<BackendData: Backend> XdgShellHandler for WayiceState<BackendData> {
 
         // The protocol demands us to always reply with a configure,
         // regardless of we fulfilled the request or not
-        surface.send_configure();
+        if surface.is_initial_configure_sent() {
+            surface.send_configure();
+        } else {
+            // Will be sent during initial configure
+        }
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
@@ -368,7 +374,11 @@ impl<BackendData: Backend> XdgShellHandler for WayiceState<BackendData> {
 
         // The protocol demands us to always reply with a configure,
         // regardless of we fulfilled the request or not
-        surface.send_configure();
+        if surface.is_initial_configure_sent() {
+            surface.send_configure();
+        } else {
+            // Will be sent during initial configure
+        }
     }
 
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {

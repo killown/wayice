@@ -2,7 +2,6 @@
 
 ![nil-79](https://github.com/user-attachments/assets/1461e43b-30d3-4d49-8591-eb5d5456f6b9)
 
-
 Wayice is a sleek and efficient Wayland compositor built using Rust and Smithay. It offers a modern, fast, and lightweight window management experience, leveraging the safety and performance benefits of Rust for smooth rendering and enhanced security.
 
 ## Dependencies
@@ -21,8 +20,7 @@ names may vary depending on your OS and linux distribution):
 - [`libseat`](https://git.sr.ht/~kennylevinsen/seatd)
 
 If you want to enable X11 support (to run X11 applications within wayice),
-then you'll need to install the following packages as well:
-    - `xwayland`
+then you'll need to install the following packages as well: - `xwayland`
 
 ## Build and run
 
@@ -42,4 +40,3 @@ The currently available backends are:
 - `--tty-udev`: start wayice in a tty with udev support. This is the "traditional" launch of a Wayland
   compositor. Note that this requires you to start wayice as root if your system does not have logind
   available.
-
